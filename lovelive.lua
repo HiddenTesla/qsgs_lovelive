@@ -156,7 +156,7 @@ puzou = sgs.CreateTriggerSkill{
                         ~= sgs.CardMoveReason_S_REASON_DISCARD) then
             return false
         end
-        if move.card_ids:length() < 2 then
+        if move.card_ids:length() < 3 then
             return false
         end        
         if not isOfDifferentSuits(move.card_ids) and not isOfSameColor(move.card_ids) then 
