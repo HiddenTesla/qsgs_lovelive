@@ -13,6 +13,13 @@ maki = sgs.General(extension,
                    3,      -- maxhp
                    false  -- gender
                    )
+                   
+nico = sgs.General(extension, 
+                   "nico", -- name of the general
+                   "shu",  -- kingdom
+                   3,      -- maxhp
+                   false  -- gender
+                   )
 
 function findMaxHandcardNum(room)
     local max_ = 0
@@ -130,7 +137,8 @@ function isOfSameColor(card_ids)
     return true    
 end
 
-puzou = sgs.CreateTriggerSkill{
+puzou = sgs.CreateTriggerSkill
+{
 	name = "puzou",
 	frequency = sgs.Skill_NotFrequent,
 	events = {sgs.CardsMoveOneTime},
@@ -188,13 +196,247 @@ puzou = sgs.CreateTriggerSkill{
 	end
 }
 
+chengneng = sgs.CreateTriggerSkill 
+{
+    name = "chengneng",
+    events = {sgs.EventPhaseStart, sgs.EventPhaseEnd, sgs.GameStart},
+    frequency = sgs.Skill_Compulsory,
+
+    on_trigger = function(self, event, player, data)
+        local room = player:getRoom()
+        local _CHENGNENG_FRONT = 1
+        local _CHENGNENG_BACK = 0
+        -- Marks need additional files in "image" direction, so I use tag instead
+        -- XXX: Limitation: Unexpected bahavior if multiple players have this skill
+        if event == sgs.GameStart then
+            room:setTag("chengneng_status", sgs.QVariant(_CHENGNENG_FRONT))
+        end
+        
+        if event == sgs.EventPhaseEnd then
+            if player:getPhase() == sgs.Player_Play then
+                local chengneng_status = 
+                    room:getTag("chengneng_status"):toInt()
+                if chengneng_status == _CHENGNENG_BACK then
+                    room:setTag("chengneng_status", sgs.QVariant(_CHENGNENG_FRONT))
+                else
+                    room:setTag("chengneng_status", sgs.QVariant(_CHENGNENG_BACK))
+                end
+            end
+        end
+        
+        if event == sgs.EventPhaseStart then
+            if player:getPhase() == sgs.Player_Play then
+                local chengneng_status = 
+                    room:getTag("chengneng_status"):toInt()
+                if chengneng_status == _CHENGNENG_BACK then
+                    room:setPlayerCardLimitation(player, "use", ".|black|.", true)
+                    room:removePlayerCardLimitation(player, "use", ".|red|.$1")
+                else
+                    room:setPlayerCardLimitation(player, "use", ".|red|.", true)
+                    room:removePlayerCardLimitation(player, "use", ".|black|.$1")
+                end
+            end
+        end
+
+    end
+}
+
+xianxu = sgs.CreateTriggerSkill 
+{
+    name = "xianxu",
+    events = {sgs.EventPhaseEnd, sgs.CardsMoveOneTime},
+    frequency = sgs.Skill_Compulsory,
+
+    on_trigger = function(self, event, player, data)
+        local room = player:getRoom()
+        
+        -- Use pile to implement "获得弃牌阶段弃置的牌"
+        -- XXX: May conflict with 固政 and/or 落英 and/or other skills!
+        -- Perhaps Room:setTag(...) is a better solution?
+        if event == sgs.CardsMoveOneTime then
+         local move = data:toMoveOneTime()
+                local source = move.from
+                if not source or player:getPhase() ~= sgs.Player_Discard then 
+                    return false
+                end
+                if (bit32.band(move.reason.m_reason, sgs.CardMoveReason_S_MASK_BASIC_REASON) 
+                                ~= sgs.CardMoveReason_S_REASON_DISCARD) then
+                    return false
+                end
+
+                player:addToPile("xianxu_discarded", move.card_ids)
+
+        elseif event == sgs.EventPhaseEnd then
+            if player:getPhase() == sgs.Player_Discard then
+                -- These verbose statements serve to find the times that you can trigger this skill
+                local ntimes = 0
+                local maxHandcardNum = 0
+                local maxHp = 0
+                local maxEquipNum = 0
+                local maxAttackRange = 0
+                for _, p in sgs.qlist(room:getOtherPlayers(player)) do
+                    if p:getHandcardNum() > maxHandcardNum then
+                        maxHandcardNum = p:getHandcardNum()
+                    end
+                    if p:getHp() > maxHp then
+                        maxHp = p:getHp()
+                    end
+                    if p:getEquips():length() > maxEquipNum then
+                        maxEquipNum = p:getEquips():length()
+                    end
+                    if p:getAttackRange() > maxAttackRange then
+                        maxAttackRange = p:getAttackRange()                        
+                    end
+                end
+                if player:getHandcardNum() < maxHandcardNum then
+                    ntimes = ntimes + 1
+                end
+                if player:getHp() < maxHp then
+                    ntimes = ntimes + 1
+                end
+                if player:getEquips():length() < maxEquipNum then
+                    ntimes = ntimes + 1
+                end
+                if player:getAttackRange() < maxAttackRange then
+                    ntimes = ntimes + 1
+                end
+                -- We have found out the times of triggering
+                
+                local discardedPile = player:getPile("xianxu_discarded")
+                for i = 1, ntimes do
+                    local result
+                    if discardedPile:length() > 0 then
+                        local choices = {"xianxu_draw+xianxu_obtain"}
+                        result = room:askForChoice(player, self:objectName(), table.concat(choices, "+"))
+                    else
+                        result = "xianxu_draw"
+                    end
+                    
+                    if result == "xianxu_draw" then
+                        player:drawCards(1)
+                    elseif result == "xianxu_obtain" then
+                        room:fillAG(discardedPile, player)
+                        local cardId = room:askForAG(player, discardedPile, false, --[[ not refusable ]] 
+                            self:objectName() )
+                        room:obtainCard(player, cardId, true)
+                        discardedPile:removeOne(cardId)
+                        room:clearAG()
+                    end
+                end                
+
+                local reason = sgs.CardMoveReason(sgs.CardMoveReason_S_REASON_REMOVE_FROM_PILE, "", "xianxu", "")
+                for _, cardId in sgs.qlist(discardedPile) do
+                    room:throwCard(sgs.Sanguosha:getCard(cardId), reason, nil)
+                    --I don't know why below does not work, so I use the above complicated one
+                    --room:throwCard(cardId, player)
+                end
+            end
+        end
+
+    end
+}
+
+zhinian = sgs.CreateTriggerSkill 
+{
+    name = "zhinian",
+    events = {sgs.HpChanged, sgs.EventPhaseChanging},
+    frequency = sgs.Skill_NotFrequent,
+
+    on_trigger = function(self, event, player, data)
+        local room = player:getRoom()
+        local nico = room:findPlayerBySkillName(self:objectName())        
+        if event == sgs.HpChanged then
+            if nico:objectName() ~= player:objectName() then
+                return false
+            end
+            -- Now we can use "nico" and "player" interchangeably, only within this if branch
+            if not room:askForSkillInvoke(player, self:objectName(), data) then
+                return false
+            end            
+            local current = room:getCurrent()
+            if current:objectName() == player:objectName() then
+                -- Uncomment below if you don't want it to trigger when current player is nico itself
+                -- return false
+            end
+            local _ZHINIAN_DRAW  = 1
+            local _ZHINIAN_THROW = 2            
+            local myThrow  = room:askForCard(player,  ".|black|.", "zhinian_throw_prompt", data, sgs.Card_MethodNone)
+            local myChoice  = _ZHINIAN_DRAW
+            if myThrow == nil then 
+            else
+                myChoice = _ZHINIAN_THROW
+            end            
+            local hisThrow = room:askForCard(current, ".|black|.", "zhinian_throw_prompt", data, sgs.Card_MethodNone) 
+            local hisChoice = _ZHINIAN_DRAW            
+            if hisThrow == nil then
+            else
+                hisChoice = _ZHINIAN_THROW
+            end            
+            if myChoice ~= hisChoice then
+                print("What a pity! We've made different choices!")
+                return false
+            end
+            
+            print("Good! We made the same choice")
+            if myChoice == _ZHINIAN_DRAW then
+                player:drawCards(1)
+                current:drawCards(1)
+            else
+                room:throwCard(myThrow, player)
+                room:throwCard(hisThrow, current)                
+            end
+            room:setPlayerFlag(current, "zhinian_donar")
+            room:setPlayerFlag(player, "zhinian_acceptor")            
+
+        elseif event == sgs.EventPhaseChanging then 
+            -- if not room:getTag("zhinian_extra") then
+            local zhinian_extra = room:getTag("zhinian_extra")
+            if zhinian_extra:toInt() == 0 then
+                --print("This is a regular turn")
+                if data:toPhaseChange().to ~= sgs.Player_NotActive or 
+                    not player:hasFlag("zhinian_donar") then
+                    return false
+                end
+                local nico = room:findPlayerBySkillName(self:objectName())
+                if nico == nil or not nico:hasFlag("zhinian_acceptor") then
+                    return false
+                end
+                if not room:askForSkillInvoke(nico, self:objectName(), data) then
+                    print("Nico does not want another phase of play")
+                    return false
+                end
+                print("Nico chooses to gain an extra phase of play")
+                -- Cannot simply gain another phase of play
+                -- Instead, gain an extra turn and skip all phases except play
+                room:setTag("zhinian_extra", sgs.QVariant(1))
+                nico:gainAnExtraTurn()
+                print("Extra turn finished")
+                room:removeTag("zhinian_extra")
+            else
+                local change = data:toPhaseChange()
+                if change.to ~= sgs.Player_Play then
+                    player:skip(change.to)                
+                end
+                
+            end
+        end
+    end,
+    
+    can_trigger = function(self, target)
+		return target
+	end
+}
+
 maki:addSkill(qianjin)
 maki:addSkill(bieniu)
 maki:addSkill(puzou)
 
+nico:addSkill(chengneng)
+nico:addSkill(xianxu)
+nico:addSkill(zhinian)
+
 sgs.LoadTranslationTable 
 {
-
     ["lovelive"] = "LoveLive!",
 
     ["maki"] = "西木野真姬",
@@ -205,10 +447,30 @@ sgs.LoadTranslationTable
 	["qianjin"] = "千金",
 	[":qianjin"] = "准备阶段或者结束阶段开始时，你可以摸X张牌（X为你和场上手牌最多的角色的手牌差且至少为1)。",
     ["bieniu"] = "彆扭",
-    [":bieniu"] = "<b>锁定技，</b>出牌阶段，你不能使用与你于此阶段内容使用的上一张牌颜色相同的牌。",
+    [":bieniu"] = "<b>锁定技，</b>出牌阶段，你不能使用与你于此阶段内使用的上一张牌颜色相同的牌。",
     
     ["puzou"] = "谱奏",
     [":puzou"] = "一名角色的弃牌阶段结束时，若于此回合进入弃牌堆的牌（至少三张）花色均不相同或颜色均相同，你可以令所有角色各回复1点体力或者各失去1点体力。",
     ["puzou_lose"] = "所有角色各失去1点体力",
     ["puzou_renerate"] = "所有角色各回复1点体力",
+    
+    ["nico"] = "矢泽妮可",
+    ["&nico"] = "矢泽妮可",
+    ["#nico"] = "小恶魔",
+    ["designer:maki"] = "醉花夢月",
+    
+    ["chengneng"] = "逞能",
+    [":chengneng"] = "<b>锁定技，</b>游戏开始时，你获得逞能标记；出牌阶段，若此标记正面朝上，你不能使用红色牌，否则你不能使用黑色牌；出牌阶段结束时，你将此标记翻面。",
+    
+
+    ["xianxu"] = "羡绪",
+    [":xianxu"] = "<b>锁定技，</b>弃牌阶段结束时，下列四项（手牌、体力、装备区的牌数、攻击范围）每有一项你不为场上最多或之一，你便选择：摸一张牌或获得一张于此阶段进入弃牌堆的牌。",
+    ["xianxu_draw"] = "摸一张牌",
+    ["xianxu_obtain"] = "获得一张此于此阶段进入弃牌堆的牌",
+    ["xianxu_discarded"] = "此轮弃牌",
+    
+    ["zhinian"] = "执念",
+    [":zhinian"] = "当你的体力变化时，你可令当前回合角色和你同时选择：摸一张牌或弃置一张黑色牌，若两者的选择不同，防止此变化；否则你可于此回合结束时执行一个额外的出牌阶段。",
+    ["zhinian_throw_prompt"] = "选择一张要弃置的黑色牌，或选择取消摸一张牌",
+
 }
