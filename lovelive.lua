@@ -20,6 +20,9 @@ nico = sgs.General(extension,
                    3,      -- maxhp
                    false  -- gender
                    )
+				   
+umi = sgs.General(extension, "umi", "wei", "3", false)
+
 
 function findMaxHandcardNum(room)
     local max_ = 0
@@ -32,7 +35,7 @@ function findMaxHandcardNum(room)
     return max_
 end
 
-qianjin = sgs.CreateTriggerSkill 
+qianjin = sgs.CreateTriggerSkill
 {
     name = "qianjin",
     events = {sgs.EventPhaseStart},
@@ -427,6 +430,124 @@ zhinian = sgs.CreateTriggerSkill
 	end
 }
 
+
+LuawudaoCard = sgs.CreateSkillCard{
+    name = "LuawudaoCard",
+    target_fixed = true,
+    will_throw = false,
+	 
+    on_use = function(self, room, source)
+        if not source:isKongcheng() then
+            local card_id = -1
+            local handcards = source:handCards()					
+            if handcards:length() == 999 then
+                room:getThread():delay(500)
+                card_id = handcards:first()
+            else
+                local cards = room:askForExchange(source, self:objectName(), 1, 1, false, "Luawudao-push")
+                local suit = cards:getSuit()
+                if suit == sgs.Card_Heart or suit == sgs.Card_Diamond then
+                    room:setPlayerFlag(source,"wudaored")
+                    --room:loseHp(source)	
+                end
+                if suit == sgs.Card_Club or suit == sgs.Card_Spade then
+                    room:setPlayerFlag(source,"wudaoblack")
+                
+                end
+                card_id = cards:getSubcards():first()
+            end
+            source:addToPile("wudao", card_id)
+        end	
+					
+    end
+}
+	
+Luawudao_tar = sgs.CreateTargetModSkill {
+    name = "#Luawudao",
+
+    distance_limit_func = function(self, from, card)
+        if from:hasFlag("wudaored") then
+            return 998
+        else
+            return 0
+        end
+    end,
+    
+    residue_func = function(self, from, card)
+        if from:hasFlag("wudaoblack") then
+            return 1
+        else
+            return 0
+        end
+    end
+}
+	
+Luawudao_return = sgs.CreateTriggerSkill {
+    name = "#Luawudao_return",
+    frequency = sgs.Skill_Compulsory,
+    events = {sgs.EventPhaseChanging},
+
+    can_trigger = function(self, target)
+        return target
+    end,
+
+    on_trigger = function(self, event, player, data)
+        local change = data:toPhaseChange()
+        local room = player:getRoom()
+        if change.to == sgs.Player_NotActive then
+            for _, p in sgs.qlist(room:getAllPlayers()) do
+                if not p:getPile("wudao"):isEmpty() then
+                    local reason = sgs.CardMoveReason(sgs.CardMoveReason_S_REASON_GOTCARD, p:objectName())
+                    local move = sgs.CardsMoveStruct(p:getPile("wudao"), p, sgs.Player_PlaceHand, reason)
+                    room:moveCardsAtomic(move, false)
+                    room:broadcastSkillInvoke("Luawudao")
+                end
+            end
+        end
+        return false
+    end
+}
+
+Luawudao = sgs.CreateViewAsSkill{
+    name = "Luawudao", 
+    n = 0, 
+    view_as = function(self, cards)
+        return LuawudaoCard:clone()
+    end, 
+    enabled_at_play = function(self, player)
+        return not player:hasUsed("#LuawudaoCard")
+    end
+
+}
+
+
+Luayanxun = sgs.CreateTriggerSkill{
+    name = "Luayanxun",
+    frequency = sgs.Skill_NotFrequent, 
+    events = {sgs.EventPhaseEnd},
+    can_trigger = function(self, target)
+        return target
+    end,
+    on_trigger = function(self, event, player, data)
+        local room = player:getRoom()
+        local umi = room:findPlayerBySkillName(self:objectName())
+        if player:getPhase() == sgs.Player_Draw then
+            
+            if room:askForSkillInvoke(umi, "Luayanxun", data) then
+                if not room:askForCard(player,"..", "@Luayanxun", data) then
+                    player:drawCards(2)
+                    room:loseMaxHp(player,1)
+                    else
+                        local currentMaxHp = player:getMaxHp()
+                        if currentMaxHp < 5 then
+                            room:setPlayerProperty(player, "maxhp", sgs.QVariant(currentMaxHp + 1))                 
+                        end
+                end
+            end
+        end
+    end,
+}
+
 maki:addSkill(qianjin)
 maki:addSkill(bieniu)
 maki:addSkill(puzou)
@@ -434,6 +555,13 @@ maki:addSkill(puzou)
 nico:addSkill(chengneng)
 nico:addSkill(xianxu)
 nico:addSkill(zhinian)
+
+umi:addSkill(Luayanxun)
+umi:addSkill(Luawudao)
+umi:addSkill(Luawudao_return)
+umi:addSkill(Luawudao_tar)
+extension:insertRelatedSkills("Luawudao", "#Luawudao")
+
 
 sgs.LoadTranslationTable 
 {
@@ -472,5 +600,20 @@ sgs.LoadTranslationTable
     ["zhinian"] = "执念",
     [":zhinian"] = "当你的体力变化时，你可令当前回合角色和你同时选择：摸一张牌或弃置一张黑色牌，若两者的选择不同，防止此变化；否则你可于此回合结束时执行一个额外的出牌阶段。",
     ["zhinian_throw_prompt"] = "选择一张要弃置的黑色牌，或选择取消摸一张牌",
+	
+    ["umi"] = "园田海未",
+    ["&umi"] = "园田海未",
+    ["#umi"] = "古風海色",
+    ["designer:umi"] = "醉花夢月",
+    ["Luawudao"] = "武道",
+    ["luawudao"] = "武道",
+    ["wudao"] = "武道",
+    ["LuawudaoCard"] = "武道",
+    [":Luawudao"] = "出牌阶段限一次，你可以将一张手牌置于武将牌上，若此牌为：红色，你于此阶段使用【杀】无距离限制；黑色，你能于此阶段额外使用一张【杀】。若如此做，此回合结束时，你获得武将牌上的牌。",
+    ["Luawudao-push"] = "请将一张手牌置于武将牌上。",
+    ["Luayanxun"] = "严训",
+    [":Luayanxun"] = "一名角色的摸牌阶段结束时，你可以令其选择一项：1.弃置一张牌，然后加1点体力上限(最多为5)；2.减1点体力上限，然后摸两张牌。",
+    ["@Luayanxun"] = "1.弃置一张牌，然后加1点体力上限(最多为5)；2.按取消减1点体力上限，然后摸两张牌。",
+    ["designer:umi"] = "醉花夢月",
 
 }
