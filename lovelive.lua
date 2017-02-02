@@ -47,9 +47,7 @@ qianjin = sgs.CreateTriggerSkill
             if not room:askForSkillInvoke(player, self:objectName(), data) then
                 return false
             end
-
             local max_ = findMaxHandcardNum(room)
-            print("The richest player has ", max_, " handcards")
             local diff = max_ - player:getHandcardNum()
             if diff < 1 then
                 diff = 1
@@ -80,11 +78,9 @@ bieniu = sgs.CreateTriggerSkill
         -- if not, use "$0"
         -- without these, you will not be able to correctly unlock it!
         if card:isRed() then
-            print("A red card is being used in my play phase. Lock red and unlock black")
             room:setPlayerCardLimitation(player, "use", ".|red|.", true)
             room:removePlayerCardLimitation(player, "use", ".|black|.$1")
         else
-            print("A black card is being used in my play phase. Lock black and unlock red")
             room:setPlayerCardLimitation(player, "use", ".|black|.", true)
             room:removePlayerCardLimitation(player, "use", ".|red|.$1")
         end
@@ -144,54 +140,88 @@ puzou = sgs.CreateTriggerSkill
 {
 	name = "puzou",
 	frequency = sgs.Skill_NotFrequent,
-	events = {sgs.CardsMoveOneTime},
+	events = {sgs.CardsMoveOneTime, sgs.EventPhaseStart, sgs.EventPhaseEnd, sgs.Death },
 	on_trigger = function(self, event, player, data)
 		local room = player:getRoom()
 		local maki = room:findPlayerBySkillName(self:objectName())
 		local current = room:getCurrent()
-		local move = data:toMoveOneTime()
-		local source = move.from
-        -- Refer to Zhangzhao's skill: guzhengOther
-        -- Return in advance to reduce levels of indentation
-        if not source then 
-            return false
-        end        
-        if player:objectName() ~= source:objectName() then
-            return false
-        end
-        if current:getPhase() ~= sgs.Player_Discard then
-            return false
-        end
-        -- verbose: if reason of move is not discard, then cannot trigger skill
-        if (bit32.band(move.reason.m_reason, sgs.CardMoveReason_S_MASK_BASIC_REASON) 
-                        ~= sgs.CardMoveReason_S_REASON_DISCARD) then
-            return false
-        end
-        if move.card_ids:length() < 3 then
-            return false
-        end        
-        if not isOfDifferentSuits(move.card_ids) and not isOfSameColor(move.card_ids) then 
-            return false
-        end
         
-        -- This is pretty easy. Just refer to 神周瑜's skill 琴音
-        local choices = {"puzou_lose+puzou_renerate+cancel"}
-        local result = room:askForChoice(maki, self:objectName(), table.concat(choices, "+"))
-        local all_players = room:getAllPlayers()
-        if result == "cancel" then
-            return false
-        elseif result == "puzou_lose" then
-            for _, target in sgs.qlist(all_players) do
-                room:loseHp(target, 1)
+        if event == sgs.Death then
+            local death = data:toDeath()
+            if death.who:objectName() == maki:objectName() then
+                room:removeTag("puzou_toDiscard")
             end
-            return true
-        elseif result == "puzou_renerate" then
-            for _, target in sgs.qlist(all_players) do
-                room:recover(target, sgs.RecoverStruct(maki))
+        elseif event == sgs.EventPhaseStart then
+            local phase = player:getPhase()
+            if phase == sgs.Player_RoundStart then
+                local toDiscard = ""
+                room:setTag("puzou_toDiscard", sgs.QVariant(toDiscard))
+            elseif phase == sgs.Player_NotActive then
+                local toDiscard = room:getTag("puzou_toDiscard")
+                room:removeTag("puzou_toDiscard")
             end
-            return true
+        elseif event == sgs.EventPhaseEnd then
+            if player:getPhase() == sgs.Player_Discard then
+                local toDiscard = ""
+                local tag = room:getTag("puzou_toDiscard")
+                if tag then
+                    toDiscard = tag:toString()
+                end
+                if toDiscard == "" then return false end
+
+                local cardTable = toDiscard:split("+")
+                if #cardTable < 3 then return false end
+
+                local card_ids = sgs.IntList()
+                for i = 1, #cardTable, 1 do
+                    local cardData = cardTable[i]
+                    if cardData == nil or cardData == "" then break end
+                    local cardId = tonumber(cardData)
+                    card_ids:append(cardId)
+                end
+
+                if not isOfSameColor(card_ids) and not isOfDifferentSuits(card_ids) then
+                    return false
+                end
+            
+                local choices = {"puzou_lose+puzou_renerate+cancel"}
+                local result = room:askForChoice(maki, self:objectName(), table.concat(choices, "+"))
+                local all_players = room:getAllPlayers()
+                if result == "cancel" then
+                    return false
+                elseif result == "puzou_lose" then
+                    for _, target in sgs.qlist(all_players) do
+                        room:loseHp(target, 1)
+                    end
+                    return true
+                elseif result == "puzou_renerate" then
+                    for _, target in sgs.qlist(all_players) do
+                        room:recover(target, sgs.RecoverStruct(maki))
+                    end
+                    return true
+                end
+                return false
+            end
+        elseif event == sgs.CardsMoveOneTime then
+            local move = data:toMoveOneTime()
+            local source = move.from
+            if not source or source:objectName() ~= player:objectName() then 
+                return false
+            end        
+            if  move.to_place ~= sgs.Player_DiscardPile then
+                return false
+            end
+            for _, id in sgs.qlist(move.card_ids) do
+                local oldList = room:getTag("puzou_toDiscard"):toString()
+                if not oldList then return false end
+                if oldList == "" then
+                    newList = tostring(id)
+                else
+                    newList = oldList .. "+" .. tostring(id)
+                end
+                room:setTag("puzou_toDiscard", sgs.QVariant(newList))
+            end
         end
-        return true       
 		
 	end,
 	can_trigger = function(self, target)
