@@ -259,15 +259,21 @@ chengneng = sgs.CreateTriggerSkill
         
         if event == sgs.EventPhaseStart then
             if player:getPhase() == sgs.Player_Play then
+                local msg = sgs.LogMessage()
+                msg.type = "#chengneng_ban"
+                msg.from = player
                 local chengneng_status = 
                     room:getTag("chengneng_status"):toInt()
                 if chengneng_status == _CHENGNENG_BACK then
                     room:setPlayerCardLimitation(player, "use", ".|black|.", true)
                     room:removePlayerCardLimitation(player, "use", ".|red|.$1")
+                    msg.arg = "black"
                 else
                     room:setPlayerCardLimitation(player, "use", ".|red|.", true)
                     room:removePlayerCardLimitation(player, "use", ".|black|.$1")
+                    msg.arg = "red"
                 end
+                room:sendLog(msg)
             end
         end
 
@@ -372,16 +378,17 @@ xianxu = sgs.CreateTriggerSkill
 zhinian = sgs.CreateTriggerSkill 
 {
     name = "zhinian",
-    events = {sgs.HpChanged, sgs.EventPhaseChanging},
+    events = {sgs.EventPhaseChanging, sgs.PreHpLost, sgs.PreHpRecover, sgs.DamageInflicted },
     frequency = sgs.Skill_NotFrequent,
 
     on_trigger = function(self, event, player, data)
         local room = player:getRoom()
         local nico = room:findPlayerBySkillName(self:objectName())        
-        if event == sgs.HpChanged then
+        if event == sgs.PreHpLost or event == sgs.PreHpRecover or event == sgs.DamageInflicted then
             if nico:objectName() ~= player:objectName() then
                 return false
             end
+
             -- Now we can use "nico" and "player" interchangeably, only within this if branch
             if not room:askForSkillInvoke(player, self:objectName(), data) then
                 return false
@@ -394,15 +401,19 @@ zhinian = sgs.CreateTriggerSkill
             local _ZHINIAN_DRAW  = 1
             local _ZHINIAN_THROW = 2            
             local myThrow  = room:askForCard(player,  ".|black|.", "zhinian_throw_prompt", data, sgs.Card_MethodNone)
-            local myChoice  = _ZHINIAN_DRAW
-            if myThrow == nil then 
-            else
-                myChoice = _ZHINIAN_THROW
-            end            
+            local myChoice  = _ZHINIAN_DRAW                
             local hisThrow = room:askForCard(current, ".|black|.", "zhinian_throw_prompt", data, sgs.Card_MethodNone) 
-            local hisChoice = _ZHINIAN_DRAW            
-            if hisThrow == nil then
+            local hisChoice = _ZHINIAN_DRAW
+            if myThrow == nil then
+                player:drawCards(1)
             else
+                room:throwCard(myThrow, player)
+                myChoice = _ZHINIAN_THROW
+            end                    
+            if hisThrow == nil then
+                current:drawCards(1)
+            else
+                room:throwCard(hisThrow, current)
                 hisChoice = _ZHINIAN_THROW
             end            
             if myChoice ~= hisChoice then
@@ -411,15 +422,18 @@ zhinian = sgs.CreateTriggerSkill
             end
             
             print("Good! We made the same choice")
-            if myChoice == _ZHINIAN_DRAW then
-                player:drawCards(1)
-                current:drawCards(1)
+            
+            local tag = room:getTag("zhinian_extra_count")
+            local count = tag:toInt()           
+            if tag == nil or count <= 0 then
+                room:setTag("zhinian_extra_count", sgs.QVariant(1))
             else
-                room:throwCard(myThrow, player)
-                room:throwCard(hisThrow, current)                
+                room:setTag("zhinian_extra_count", sgs.QVariant(count + 1))            
             end
+
             room:setPlayerFlag(current, "zhinian_donar")
-            room:setPlayerFlag(player, "zhinian_acceptor")            
+            room:setPlayerFlag(player, "zhinian_acceptor")
+            return true            
 
         elseif event == sgs.EventPhaseChanging then 
             -- if not room:getTag("zhinian_extra") then
@@ -434,17 +448,31 @@ zhinian = sgs.CreateTriggerSkill
                 if nico == nil or not nico:hasFlag("zhinian_acceptor") then
                     return false
                 end
-                if not room:askForSkillInvoke(nico, self:objectName(), data) then
-                    print("Nico does not want another phase of play")
-                    return false
-                end
-                print("Nico chooses to gain an extra phase of play")
+                local nExtras = room:getTag("zhinian_extra_count"):toInt()                
+                if nExtras <= 0 then return false end               
+                
                 -- Cannot simply gain another phase of play
-                -- Instead, gain an extra turn and skip all phases except play
-                room:setTag("zhinian_extra", sgs.QVariant(1))
-                nico:gainAnExtraTurn()
-                print("Extra turn finished")
-                room:removeTag("zhinian_extra")
+                -- Instead, gain an extra turn and skip all phases except play           
+                while nExtras > 0 do
+                    print("Nico has ", nExtras, " extra phases left")
+                    local msg = sgs.LogMessage()
+                    msg.type = "#zhinian_play"
+                    msg.from = player
+                    msg.arg = nExtras
+                    room:sendLog(msg)
+                    local choice = room:askForChoice(player, self:objectName(), 
+                        "zhinian_extra_yes+zhinian_extra_no")                    
+                    if choice == "zhinian_extra_no" then
+                        room:removeTag("zhinian_extra")
+                        break
+                    end
+                    room:setTag("zhinian_extra", sgs.QVariant(1))
+                    nico:gainAnExtraTurn()
+                    room:removeTag("zhinian_extra")
+                    nExtras = nExtras - 1
+                end
+                
+                room:removeTag("zhinian_extra_count")
             else
                 local change = data:toPhaseChange()
                 if change.to ~= sgs.Player_Play then
@@ -619,7 +647,7 @@ sgs.LoadTranslationTable
     
     ["chengneng"] = "逞能",
     [":chengneng"] = "<b>锁定技，</b>游戏开始时，你获得逞能标记；出牌阶段，若此标记正面朝上，你不能使用红色牌，否则你不能使用黑色牌；出牌阶段结束时，你将此标记翻面。",
-    
+    ["#chengneng_ban"] = "%from此出牌阶段不能使用%arg牌",
 
     ["xianxu"] = "羡绪",
     [":xianxu"] = "<b>锁定技，</b>弃牌阶段结束时，下列四项（手牌、体力、装备区的牌数、攻击范围）每有一项你不为场上最多或之一，你便选择：摸一张牌或获得一张于此阶段进入弃牌堆的牌。",
@@ -630,6 +658,9 @@ sgs.LoadTranslationTable
     ["zhinian"] = "执念",
     [":zhinian"] = "当你的体力变化时，你可令当前回合角色和你同时选择：摸一张牌或弃置一张黑色牌，若两者的选择不同，防止此变化；否则你可于此回合结束时执行一个额外的出牌阶段。",
     ["zhinian_throw_prompt"] = "选择一张要弃置的黑色牌，或选择取消摸一张牌",
+    ["zhinian_extra_yes"] = "执行一个额外的出牌阶段",
+    ["zhinian_extra_no"]  = "取消",
+    ["#zhinian_play"] = "%from还有%arg个额外的出牌阶段",
 	
     ["umi"] = "园田海未",
     ["&umi"] = "园田海未",
