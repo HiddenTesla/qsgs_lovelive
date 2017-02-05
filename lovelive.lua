@@ -417,23 +417,21 @@ zhinian = sgs.CreateTriggerSkill
                 hisChoice = _ZHINIAN_THROW
             end            
             if myChoice ~= hisChoice then
-                print("What a pity! We've made different choices!")
+                print("We've made different choices. Prevent HP change")
+                return true
+            else
+                print("Good! We made the same choice")                
+                local tag = room:getTag("zhinian_extra_count")
+                local count = tag:toInt()           
+                if tag == nil or count <= 0 then
+                    room:setTag("zhinian_extra_count", sgs.QVariant(1))
+                else
+                    room:setTag("zhinian_extra_count", sgs.QVariant(count + 1))            
+                end
+                room:setPlayerFlag(current, "zhinian_donar")
+                room:setPlayerFlag(player, "zhinian_acceptor")
                 return false
             end
-            
-            print("Good! We made the same choice")
-            
-            local tag = room:getTag("zhinian_extra_count")
-            local count = tag:toInt()           
-            if tag == nil or count <= 0 then
-                room:setTag("zhinian_extra_count", sgs.QVariant(1))
-            else
-                room:setTag("zhinian_extra_count", sgs.QVariant(count + 1))            
-            end
-
-            room:setPlayerFlag(current, "zhinian_donar")
-            room:setPlayerFlag(player, "zhinian_acceptor")
-            return true            
 
         elseif event == sgs.EventPhaseChanging then 
             -- if not room:getTag("zhinian_extra") then
@@ -457,10 +455,10 @@ zhinian = sgs.CreateTriggerSkill
                     print("Nico has ", nExtras, " extra phases left")
                     local msg = sgs.LogMessage()
                     msg.type = "#zhinian_play"
-                    msg.from = player
+                    msg.from = nico
                     msg.arg = nExtras
                     room:sendLog(msg)
-                    local choice = room:askForChoice(player, self:objectName(), 
+                    local choice = room:askForChoice(nico, self:objectName(), 
                         "zhinian_extra_yes+zhinian_extra_no")                    
                     if choice == "zhinian_extra_no" then
                         room:removeTag("zhinian_extra")
@@ -470,8 +468,7 @@ zhinian = sgs.CreateTriggerSkill
                     nico:gainAnExtraTurn()
                     room:removeTag("zhinian_extra")
                     nExtras = nExtras - 1
-                end
-                
+                end                
                 room:removeTag("zhinian_extra_count")
             else
                 local change = data:toPhaseChange()
