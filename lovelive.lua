@@ -14,15 +14,10 @@ maki = sgs.General(extension,
                    false  -- gender
                    )
                    
-nico = sgs.General(extension, 
-                   "nico", -- name of the general
-                   "shu",  -- kingdom
-                   3,      -- maxhp
-                   false  -- gender
-                   )
+nico = sgs.General(extension, "nico", "shu", 3, false )
 				   
 umi = sgs.General(extension, "umi", "wei", "3", false)
-
+eli = sgs.General(extension, "eli", "wei", 3, false)
 
 function findMaxHandcardNum(room)
     local max_ = 0
@@ -603,6 +598,42 @@ Luayanxun = sgs.CreateTriggerSkill{
     end,
 }
 
+pianqian = sgs.CreateTriggerSkill 
+{
+    name = "pianqian",
+    events = {sgs.EventPhaseEnd},
+    frequency = sgs.Skill_NotFrequent,
+    on_trigger = function(self, event, player, data)
+
+        local room = player:getRoom()
+        local lastRank = 0x7FFF
+        if player:getPhase() == sgs.Player_Draw then
+            for i = 1, 4, 1 do            
+                local card = room:askForCard(player, ".|.|.", "@pianqian_prompt", data, self:objectName())
+                if not card then break end
+                local thisRank = card:getNumber()
+                if thisRank > lastRank then
+                    local targets = sgs.SPlayerList()
+                    for _, p in sgs.qlist(room:getOtherPlayers(player)) do
+                        if not p:isKongcheng() then
+                            targets:append(p)
+                        end
+                    end
+                    if targets:isEmpty() then return false end
+                    local target = room:askForPlayerChosen(player, targets, self:objectName(), "@pianqian_steal")
+                    if not target then return false end
+                    local cardId = room:askForCardChosen(player, target, "h", self:objectName())
+                    room:obtainCard(player, cardId)
+                end
+                if card:isBlack() then
+                    room:loseHp(player, 1)
+                end
+                lastRank = thisRank
+            end
+        end
+    end
+}
+
 maki:addSkill(qianjin)
 maki:addSkill(bieniu)
 maki:addSkill(puzou)
@@ -617,6 +648,7 @@ umi:addSkill(Luawudao_return)
 umi:addSkill(Luawudao_tar)
 extension:insertRelatedSkills("Luawudao", "#Luawudao")
 
+eli:addSkill(pianqian)
 
 sgs.LoadTranslationTable 
 {
@@ -673,5 +705,13 @@ sgs.LoadTranslationTable
     [":Luayanxun"] = "一名角色的摸牌阶段结束时，你可以令其选择一项：1.弃置一张牌，然后加1点体力上限(最多为5)；2.减1点体力上限，然后摸两张牌。",
     ["@Luayanxun"] = "1.弃置一张牌，然后加1点体力上限(最多为5)；2.按取消减1点体力上限，然后摸两张牌。",
     ["designer:umi"] = "醉花夢月",
-
+    
+    ["eli"] = "绚濑绘里",
+    ["&eli"] = "绚濑绘里",
+    ["#eli"] = "聪颖妍丽",
+    ["designer:umi"] = "醉花夢月",
+    ["pianqian"] = "翩跹",
+    [":pianqian"] = "摸牌阶段结束时，你可以依次弃置一至四张牌，每当你弃置的牌：点数大于上一张以此法弃置的牌，你获得一名其他角色的一张手牌；为黑色，你失去1点体力。",
+    ["@pianqian_prompt"] = "你可以依次弃置一至四张牌",
+    ["@pianqian_steal"] = "选择一名其他角色获得其一张手牌",
 }
